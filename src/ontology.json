@@ -1,0 +1,69 @@
+{
+  "fraud_types": {
+    "non-delivery": {
+      "violated_rights": ["Right to Seek Redressal"],
+      "semantic_description": "The user is complaining that they did not receive the product they ordered, or they received a completely different or wrong item.",
+      "law_sections": ["Section 2(11) - Deficiency in Service (Requires corpus verification)"],
+      "forum": "Consumer Commission",
+      "action_suggested": "Send legal notice, then file complaint at appropriate Consumer Commission."
+    },
+    "defective goods": {
+      "violated_rights": ["Right to Quality/Standard", "Right to Seek Redressal"],
+      "semantic_description": "The user is complaining that a physical product they received is broken, damaged, malfunctioning, or not operating as expected.",
+      "law_sections": ["Section 2(10) - Defect (Requires corpus verification)"],
+      "forum": "Consumer Commission",
+      "action_suggested": "Request replacement/refund from seller, then file complaint."
+    },
+    "deficiency in service": {
+      "violated_rights": ["Right to Seek Redressal"],
+      "semantic_description": "The user is complaining about a paid service that is unreliable, interrupted, poor quality, or halted. This applies to electricity, internet, telecom, transport, or repair services.",
+      "law_sections": ["Section 2(11) - Deficiency in Service (Requires corpus verification)"],
+      "forum": "Consumer Commission",
+      "action_suggested": "Lodge complaint with the service provider's grievance officer, then file at Consumer Commission."
+    },
+    "unfair trade practice": {
+      "violated_rights": ["Right to Protection against Unfair Trade Practices"],
+      "semantic_description": "The user is complaining about deceptive pricing, being charged higher than displayed, hidden fees, dark patterns, or being charged for items they never agreed to.",
+      "law_sections": ["Section 2(47) - Unfair Trade Practice (Requires corpus verification)"],
+      "forum": "Consumer Commission",
+      "action_suggested": "File complaint highlighting unfair trade practice and request refund of unauthorized charges."
+    },
+    "refund refusal": {
+      "violated_rights": ["Right to Seek Redressal"],
+      "semantic_description": "The user is complaining that a seller or platform is refusing to honor a return policy, refusing to give money back, or denying a refund request.",
+      "law_sections": ["Consumer Protection (E-Commerce) Rules (Requires corpus verification)"],
+      "forum": "Consumer Commission",
+      "action_suggested": "Issue legal notice for refund denial, then escalate."
+    },
+    "misleading advertisement": {
+      "violated_rights": ["Right to Information", "Right to Protection against Unfair Trade Practices"],
+      "semantic_description": "The user is complaining that a seller or advertisement made false claims, deceptive promises, or the product features do not match what was advertised.",
+      "law_sections": ["Section 2(28) - Misleading Advertisement (Requires corpus verification)"],
+      "forum": "CCPA (Central Consumer Protection Authority)",
+      "action_suggested": "File complaint with CCPA."
+    }
+  },
+  "rights": {
+    "Right to Safety": "Section 2(9)(i)",
+    "Right to Information": "Section 2(9)(ii)",
+    "Right to Choice": "Section 2(9)(iii)",
+    "Right to be Heard": "Section 2(9)(iv)",
+    "Right to Seek Redressal": "Section 2(9)(v)",
+    "Right to Consumer Awareness": "Section 2(9)(vi)"
+  },
+  "pecuniary_jurisdiction": {
+    "district": {
+      "max_amount_inr": 5000000,
+      "description": "Up to Rs. 50 Lakhs"
+    },
+    "state": {
+      "min_amount_inr": 5000000,
+      "max_amount_inr": 20000000,
+      "description": "Between Rs. 50 Lakhs and Rs. 2 Crores"
+    },
+    "national": {
+      "min_amount_inr": 20000000,
+      "description": "Above Rs. 2 Crores"
+    }
+  }
+}
