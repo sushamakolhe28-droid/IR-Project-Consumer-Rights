@@ -12,3 +12,4 @@ This document tracks all real sources crawled and utilized in this project.
 | Indian Kanoon - Consumer Cases | Cases | Various | Pending | Pending |
 | National Consumer Helpline (1915) Categories | Procedure/FAQ | Pending | Pending | Pending |
 |Consumer Protection (Jurisdiction of the District Commission, the State Commission and the National Commission) Rules, 2021|
+|CONSUMER RIGHTS A2019-35|

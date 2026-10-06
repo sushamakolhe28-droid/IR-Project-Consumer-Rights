@@ -10,6 +10,7 @@ from src.rankers.tfidf import TFIDFRanker
 from src.rankers.bm25 import BM25Ranker
 from src.rankers.language_model import LanguageModelRanker
 from src.forum_guidance import parse_monetary_amount, get_forum_guidance, determine_forum
+from src.query_expansion import expand_query
 
 st.set_page_config(
     page_title="Consumer Rights Helper",
@@ -209,73 +210,129 @@ def highlight_terms(text, query):
     pattern = re.compile(rf'\b({"|".join(escaped_tokens)}[a-z]*)\b', re.IGNORECASE)
     return pattern.sub(r'<mark class="highlight">\1</mark>', text)
 
+def format_passage_lines(text):
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    pattern = re.compile(r'(?<!\n)(?<=\S)[\t ]+(\((?:[a-z]|\d+|[ivx]+)\)\s+)', re.IGNORECASE)
+    formatted = pattern.sub(r'\n\1', text)
+    lines = [line.strip() for line in formatted.split('\n') if line.strip()]
+    return lines
+
+def detect_complaint_category(text):
+    text_lower = text.lower()
+    if 'washing machine' in text_lower:
+        return 'goods'
+    if 'builder' in text_lower or 'delayed possession' in text_lower or 'possession' in text_lower or 'flat' in text_lower:
+        return 'service'
+    goods_kw = ['product', 'goods', 'machine', 'device', 'phone', 'fridge', 'laptop', 'item', 'defect', 'defective', 'spinning', 'clothes', 'shoe', 'shoes', 'appliance', 'vehicle', 'car', 'bike']
+    serv_kw = ['service', 'airline', 'flight', 'ticket', 'hotel', 'travel', 'broadband', 'internet', 'telecom', 'bank', 'banking', 'insurance', 'hospital', 'doctor', 'courier', 'subscription', 'delay']
+    g_score = sum(1 for k in goods_kw if k in text_lower)
+    s_score = sum(1 for k in serv_kw if k in text_lower)
+    if g_score > s_score:
+        return 'goods'
+    elif s_score > g_score:
+        return 'service'
+    return 'unclear'
+
 def generate_complaint_draft(query_text, guidance):
-    amount_str = f"{guidance['raw_match']} (approx. ₹{guidance['amount']:,.0f})" if guidance.get('raw_match') else "[Amount as per invoice / receipt]"
-    forum_str = guidance['forum_name'] if guidance.get('forum_name') else "District Consumer Disputes Redressal Commission"
+    has_amount = bool(guidance.get('raw_match') and guidance.get('amount') is not None)
     
-    return f"""BEFORE THE HON'BLE {forum_str.upper()}
-AT [DISTRICT / CITY NAME, STATE]
+    if has_amount:
+        amount_val = guidance['raw_match']
+        forum_tier = guidance.get('forum_tier')
+        if forum_tier == 'State Commission':
+            forum_heading = "STATE CONSUMER DISPUTES REDRESSAL COMMISSION"
+            forum_location = "[district / city name, state]"
+            pecuniary_text = f"The total value of goods or services paid as consideration is {amount_val}. This Hon'ble Commission has pecuniary jurisdiction under Section 34 of the Consumer Protection Act, 2019 and Rule 4 of the Consumer Protection (Jurisdiction of the District Commission, the State Commission and the National Commission) Rules, 2021 (consideration exceeds fifty lakh rupees but does not exceed two crore rupees)."
+        elif forum_tier == 'National Commission':
+            forum_heading = "NATIONAL CONSUMER DISPUTES REDRESSAL COMMISSION"
+            forum_location = "NEW DELHI"
+            pecuniary_text = f"The total value of goods or services paid as consideration is {amount_val}. This Hon'ble Commission has pecuniary jurisdiction under Section 34 of the Consumer Protection Act, 2019 and Rule 5 of the Consumer Protection (Jurisdiction of the District Commission, the State Commission and the National Commission) Rules, 2021 (consideration exceeds two crore rupees)."
+        else:
+            forum_heading = "DISTRICT CONSUMER DISPUTES REDRESSAL COMMISSION"
+            forum_location = "[district / city name, state]"
+            pecuniary_text = f"The total value of goods or services paid as consideration is {amount_val}. This Hon'ble Commission has pecuniary jurisdiction under Section 34 of the Consumer Protection Act, 2019 and Rule 3 of the Consumer Protection (Jurisdiction of the District Commission, the State Commission and the National Commission) Rules, 2021 (consideration does not exceed fifty lakh rupees)."
+        refund_line = f"To refund the price paid, with interest [Section 39(1)(c)] ({amount_val});"
+    else:
+        forum_heading = "DISTRICT CONSUMER DISPUTES REDRESSAL COMMISSION"
+        forum_location = "[district / city name, state]"
+        pecuniary_text = "The total value of goods or services paid as consideration is [amount paid]. Pecuniary jurisdiction is governed by Section 34 of the Consumer Protection Act, 2019 and Rules 3-5 of the Consumer Protection (Jurisdiction of the District Commission, the State Commission and the National Commission) Rules, 2021 (Rule 3 for consideration up to fifty lakh rupees; Rule 4 for consideration between fifty lakh and two crore rupees; Rule 5 for consideration exceeding two crore rupees)."
+        refund_line = "To refund the price paid, with interest [Section 39(1)(c)];"
+
+    defect_cues = ["defect", "defective", "faulty", "broken", "not working", "damaged", "stopped", "poor quality"]
+    text_lower = query_text.lower()
+    has_defect_cue = any(cue in text_lower for cue in defect_cues)
+
+    category = detect_complaint_category(query_text)
+    if category == 'goods':
+        prayer_a = "To remove the defect from the goods [Section 39(1)(a)];"
+    elif category == 'service':
+        prayer_a = "To remove the deficiency in the service [Section 39(1)(a)];"
+    else:
+        prayer_a = "To remove the defect from the goods / deficiency in the service [Section 39(1)(a)];"
+
+    if has_defect_cue:
+        reliefs_block = f"""(a) {prayer_a}
+(b) To replace the goods with new goods free from defects [Section 39(1)(b)];
+(c) {refund_line}
+(d) To pay compensation for loss, injury, or hardship suffered [Section 39(1)(d)]."""
+    else:
+        reliefs_block = f"""(a) {refund_line}
+(b) To pay compensation for loss, injury, or hardship suffered [Section 39(1)(d)]."""
+
+    return f"""Template draft, not legal advice.
+
+BEFORE THE HON'BLE {forum_heading}
+AT {forum_location}
 
 CONSUMER COMPLAINT NO. ______ OF 2026
 (Filed under Section 35 of the Consumer Protection Act, 2019)
 
 IN THE MATTER OF:
-[Complainant Full Name]
-Aged about ___ years, S/o or D/o [Father's / Spouse's Name]
-Permanent Address: [Complete Residential Address]
-Current Address: [Current Postal Address]
-Phone: [Mobile Number] | Email: [Email Address]
+
+[complainant name]
+Address: [complainant address]
+Phone: [contact number] | Email: [email]
                                                     ... COMPLAINANT
 
 VERSUS
 
-[Opposite Party / Company / Seller / Service Provider / Builder Name]
-Through its Managing Director / Authorized Representative
-Registered Office: [Full Corporate / Business Address]
-Branch Office (if any): [Branch Address]
-Customer Care Email: [Email] | Phone: [Phone]
+[seller name]
+Address: [seller address]
                                                     ... OPPOSITE PARTY
 
-MEMORANDUM OF COMPLAINT UNDER SECTION 35 OF CPA, 2019
+MEMORANDUM OF COMPLAINT UNDER SECTION 35 OF THE CONSUMER PROTECTION ACT, 2019
 
-The Complainant most respectfully submits as follows:
+The Complainant respectfully states:
 
-1. CONSUMER STATUS:
-The Complainant is a 'consumer' as defined under Section 2(7) of the Consumer Protection Act, 2019, having purchased goods / availed services from the Opposite Party for valuable consideration.
+1. PARTIES:
+The Complainant is filing this complaint against the Opposite Party [seller name] under Section 35 of the Consumer Protection Act, 2019 in relation to goods sold/delivered or services provided/agreed to be provided.
 
 2. STATEMENT OF FACTS & GRIEVANCE:
 {query_text.strip()}
 
-3. VALUE OF CONSIDERATION & PECUNIARY JURISDICTION:
-The total value of goods or services paid as consideration is {amount_str}. This Hon'ble Commission has the requisite pecuniary jurisdiction to entertain and adjudicate this complaint pursuant to the Consumer Protection (Jurisdiction of the District Commission, the State Commission and the National Commission) Rules, 2021.
+3. PECUNIARY JURISDICTION:
+{pecuniary_text}
 
 4. TERRITORIAL JURISDICTION:
-This Hon'ble Commission has territorial jurisdiction under Section 34(2) of the Consumer Protection Act, 2019 because:
-(a) The Complainant resides / personally works for gain within the local limits of this Hon'ble Commission [Section 34(2)(d)]; and/or
-(b) The cause of action wholly or in part arose within the jurisdiction of this Hon'ble Commission [Section 34(2)(c)].
+This Hon'ble Commission has territorial jurisdiction under Section 34 of the Consumer Protection Act, 2019 as the Complainant resides or personally works for gain, or the cause of action wholly or in part arose, within the local limits of this Hon'ble Commission.
 
 5. LIMITATION PERIOD:
-The cause of action arose on [Date when problem occurred / refusal took place]. This complaint is filed well within the statutory limitation period of two years prescribed under Section 69(1) of the Consumer Protection Act, 2019.
+The cause of action arose on [date]. This complaint is being filed within two years of that date, as required by Section 69 of the Consumer Protection Act, 2019. [Confirm before filing]
 
-6. PRAYER / RELIEFS SOUGHT:
-In view of the above facts, and as provided under Section 39(1) of the Consumer Protection Act, 2019, the Complainant respectfully prays that this Hon'ble Commission may be pleased to direct the Opposite Party:
-(a) To remove the defect in the goods / deficiency in service [Section 39(1)(a)];
-(b) To replace the defective product with a new product of similar description free from defects [Section 39(1)(b)];
-(c) To refund the entire consideration amount of {amount_str} along with interest [Section 39(1)(c)];
-(d) To pay an amount of Rs. [Amount] as compensation for mental agony, financial loss, and hardship suffered due to negligence and unfair trade practice [Section 39(1)(d)];
-(e) To pay Rs. [Amount] towards litigation expenses; and
-(f) Pass any other order or grant such further relief as this Hon'ble Commission may deem fit in the interest of justice.
+6. RELIEFS SOUGHT:
+Under Section 39 of the Consumer Protection Act, 2019, the Complainant respectfully prays for the following reliefs:
+{reliefs_block}
 
-PLACE: [City]
-DATE: [Date]
+PLACE: [district / city name, state]
+DATE: [date]
 
                                                     ___________________________
                                                     (SIGNATURE OF COMPLAINANT)
-                                                    [Complainant Full Name]
+                                                    [complainant name]
 
 VERIFICATION:
-I, the Complainant above-named, do hereby solemnly declare and verify that the facts stated in paragraphs 1 to 6 above are true and correct to my personal knowledge and belief, and nothing material has been concealed therefrom.
-Verified at [City] on this [Day] of [Month], 2026.
+I, [complainant name], verify that the contents of this complaint are true to my knowledge and belief.
+Verified at [district / city name, state] on [date].
 
                                                     ___________________________
                                                     (SIGNATURE OF COMPLAINANT)
@@ -303,9 +360,12 @@ else:
 # 2. Input Section
 if "complaint_input" not in st.session_state:
     st.session_state["complaint_input"] = ""
+if "has_searched" not in st.session_state:
+    st.session_state["has_searched"] = False
 
 def set_example_complaint(text):
     st.session_state["complaint_input"] = text
+    st.session_state["has_searched"] = True
 
 query_text = st.text_area(
     "Describe your consumer complaint:",
@@ -333,134 +393,192 @@ with col_ex2:
 with col_ex3:
     st.button("Hidden charges at checkout", on_click=set_example_complaint, args=(EX_CHARGES,), use_container_width=True)
 
-# Process search
-has_query = bool(query_text.strip())
+# Process search state
+if search_clicked:
+    if query_text.strip():
+        st.session_state["has_searched"] = True
+    else:
+        st.session_state["has_searched"] = False
 
-if search_clicked and not has_query:
+if not query_text.strip():
+    st.session_state["has_searched"] = False
+
+if search_clicked and not query_text.strip():
     st.info("👋 Please describe your problem above or click one of the examples to see your rights.")
-elif has_query:
+elif st.session_state["has_searched"] and query_text.strip():
     with st.spinner("Finding relevant consumer rights and legal provisions..."):
-        # 1. Guidance Resolution
-        guidance = get_forum_guidance(query_text)
-        
-        # 3a. Row of 3 Equal Cards
-        st.markdown("<div style='margin-top: 24px;'></div>", unsafe_allow_html=True)
-        col_file, col_deadline, col_relief = st.columns(3)
-        
-        # Card 1: Where to file
-        with col_file:
-            if guidance["show_forum_box"]:
-                where_html = f"""
-                <div class="result-card">
-                    <div>
-                        <div class="card-heading">🏛️ Where to file</div>
-                        <div class="card-body">
-                            <div class="card-highlight"><b>{guidance['forum_name']}</b></div>
-                            <div>For consideration of <b>{guidance['raw_match']}</b> (approx. ₹{guidance['amount']:,.0f}).</div>
-                            <div class="card-subtext">Other tiers: District (≤ ₹50 Lakh), State (₹50L–₹2 Crore), National (> ₹2 Crore).</div>
-                            <div style="margin-top: 6px;">You can file where you live, where the problem happened, or online.</div>
-                        </div>
-                    </div>
-                    <div class="card-citation">Jurisdiction Rules 2021 | Rules 3–5; CPA 2019 Section 34(2), 35</div>
-                </div>
-                """
-            else:
-                where_html = """
-                <div class="result-card">
-                    <div>
-                        <div class="card-heading">🏛️ Where to file</div>
-                        <div class="card-body">
-                            <div>Which commission you go to depends on the amount you paid. Add the amount (for example Rs 45,000) to see yours.</div>
-                            <div class="card-subtext">Tiers: District (≤ ₹50 Lakh), State (₹50L–₹2 Crore), National (> ₹2 Crore).</div>
-                            <div style="margin-top: 6px;">You can file where you live, where the problem happened, or online.</div>
-                        </div>
-                    </div>
-                    <div class="card-citation">Jurisdiction Rules 2021 | Rules 3–5; CPA 2019 Section 34(2), 35</div>
-                </div>
-                """
-            st.markdown(where_html, unsafe_allow_html=True)
-
-        # Card 2: Deadline
-        with col_deadline:
-            deadline_html = """
-            <div class="result-card">
-                <div>
-                    <div class="card-heading">⏳ Deadline</div>
-                    <div class="card-body">
-                        <div>File within <b>two years</b> from the date on which the cause of action arose.</div>
-                        <div style="margin-top: 6px;">Late complaints may be admitted only if you satisfy the Commission that you had sufficient cause for delay.</div>
-                    </div>
-                </div>
-                <div class="card-citation">Consumer Protection Act 2019 | Section 69</div>
-            </div>
-            """
-            st.markdown(deadline_html, unsafe_allow_html=True)
-
-        # Card 3: You can ask for
-        with col_relief:
-            relief_html = """
-            <div class="result-card">
-                <div>
-                    <div class="card-heading">⚖️ You can ask for</div>
-                    <div class="card-body">
-                        <div>• <b>Remove defect</b> or <b>replace goods</b> with new defect-free goods</div>
-                        <div style="margin-top: 3px;">• <b>Full refund</b> of price or charges paid, with interest</div>
-                        <div style="margin-top: 3px;">• <b>Compensation</b> for loss, injury or punitive damages</div>
-                    </div>
-                </div>
-                <div class="card-citation">Consumer Protection Act 2019 | Section 39(1)(a)-(d)</div>
-            </div>
-            """
-            st.markdown(relief_html, unsafe_allow_html=True)
-
-        # Official Filing Links & Ready-to-file Complaint Draft
-        st.markdown("""
-        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 18px; margin-top: 14px; margin-bottom: 14px; font-size: 14px; color: #334155;">
-            <b>Official Portals to File or Register Grievance:</b><br/>
-            • <b>e-Daakhil Portal:</b> File your complaint electronically before District, State, or National Consumer Commissions at <a href="https://edaakhil.nic.in" target="_blank" style="color: #1d4ed8; text-decoration: underline; font-weight: 600;">edaakhil.nic.in</a> (under Section 35 of CPA 2019).<br/>
-            • <b>National Consumer Helpline (NCH):</b> Register consumer grievances for pre-litigation departmental mediation at <a href="https://consumerhelpline.gov.in" target="_blank" style="color: #1d4ed8; text-decoration: underline; font-weight: 600;">consumerhelpline.gov.in</a> or call Toll-Free <b>1915</b>.
-        </div>
-        """, unsafe_allow_html=True)
-
-        with st.expander("📝 Generate Ready-to-File Complaint Draft (Copy & Submit)", expanded=False):
-            st.caption("A structured formal complaint draft based on Section 35 of the Consumer Protection Act, 2019. You can copy, fill in your personal details, and file directly with the Consumer Commission or on e-Daakhil.")
-            complaint_draft = generate_complaint_draft(query_text, guidance)
-            st.code(complaint_draft, language="text")
-            st.download_button(
-                label="📥 Download Complaint Draft (.txt)",
-                data=complaint_draft,
-                file_name="consumer_complaint_draft.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
-
-        # 3b. Laws that apply to your problem
+        # 1. Retrieval
         model = models_dict[selected_model]
-        query_tokens = preprocess(query_text)
-        
-        st.markdown("### Laws that apply to your problem")
+        user_tokens = preprocess(query_text)
+        query_tokens = expand_query(query_text, user_tokens=user_tokens)
         
         if not query_tokens:
-            st.info("ℹ️ No retrieval tokens were produced for this query. If this is a Hindi query, pure Devanagari text is stripped by the retrieval analyzer (vocabulary-mismatch limitation).")
+            scored_results = []
         else:
-            scored_results = model.score(query_tokens)
-            top_5 = scored_results[:5]
+            scored = model.score(query_tokens)
+            scored_results = [s for s in scored if s[1] > 0]
             
-            if not top_5:
-                st.info("No matching legal passages found in the corpus.")
-            else:
-                for rank, (doc_id, _) in enumerate(top_5, 1):
-                    passage_data = passages_dict.get(doc_id, {})
-                    raw_text = passage_data.get('text', '')
-                    breadcrumb = passage_data.get('metadata', {}).get('breadcrumb', doc_id)
-                    doc_tag = passage_data.get('metadata', {}).get('doc', '')
-                    
-                    highlighted_body = highlight_terms(raw_text, query_text)
-                    
-                    # Top 5 passages as expanders, first expanded by default, titled with breadcrumb
-                    with st.expander(f"{breadcrumb}", expanded=(rank == 1)):
+        top_5 = scored_results[:5]
+
+        if not top_5:
+            st.info("We could not find a consumer law that matches this. Describe what you bought or the service you used, what went wrong, and how much you paid.")
+        else:
+            # 2. Guidance Resolution
+            guidance = get_forum_guidance(query_text)
+            
+            # 3a. Row of 3 Equal Cards
+            st.markdown("<div style='margin-top: 24px;'></div>", unsafe_allow_html=True)
+            col_file, col_deadline, col_relief = st.columns(3)
+            
+            # Card 1: Where to file
+            with col_file:
+                if guidance["show_forum_box"]:
+                    raw_amt = guidance.get('raw_match')
+                    if raw_amt:
+                        raw_clean = raw_amt.strip()
+                        if not re.match(r'^(?:rs\.?|inr|₹)', raw_clean, re.I):
+                            amt_display = f"Rs {raw_clean}"
+                        else:
+                            amt_display = re.sub(r'^(?:₹|inr\s*|rs\.?\s*)', 'Rs ', raw_clean, flags=re.I)
+                    else:
+                        amt_display = f"Rs {guidance['amount']:,.0f}" if guidance.get('amount') else ""
+
+                    all_found = guidance.get('all_matches', [])
+                    ambiguous_html = ""
+                    if guidance.get('is_ambiguous') and len(all_found) > 1:
+                        clean_all = []
+                        for a in all_found:
+                            ac = a.strip()
+                            if not re.match(r'^(?:rs\.?|inr|₹)', ac, re.I):
+                                clean_all.append(f"Rs {ac}")
+                            else:
+                                clean_all.append(re.sub(r'^(?:₹|inr\s*|rs\.?\s*)', 'Rs ', ac, flags=re.I))
+                        ambiguous_html = f"""
+                        <div style="font-size: 13px; color: #475569; margin-top: 4px;">All amounts found: {', '.join(clean_all)}</div>
+                        <div style="color: #b45309; font-weight: 600; font-size: 13px; margin-top: 4px;">⚠️ Check the amount</div>
+                        """
+
+                    where_html = f"""
+                    <div class="result-card">
+                        <div>
+                            <div class="card-heading">🏛️ Where to file</div>
+                            <div class="card-body">
+                                <div class="card-highlight"><b>{guidance['forum_name']}</b></div>
+                                <div>Amount detected: <b>{amt_display}</b></div>
+                                {ambiguous_html}
+                                <div class="card-subtext">Other tiers: District (≤ ₹50 Lakh), State (₹50L–₹2 Crore), National (> ₹2 Crore).</div>
+                                <div style="margin-top: 6px;">You can file where you live, where the problem happened, or online.</div>
+                            </div>
+                        </div>
+                        <div class="card-citation">Jurisdiction Rules 2021 | Rules 3–5; CPA 2019 Section 34(2), 35</div>
+                    </div>
+                    """
+                else:
+                    where_html = """
+                    <div class="result-card">
+                        <div>
+                            <div class="card-heading">🏛️ Where to file</div>
+                            <div class="card-body">
+                                <div>Which commission you go to depends on the amount you paid. Add the amount (for example Rs 45,000) to see yours.</div>
+                                <div class="card-subtext">Tiers: District (≤ ₹50 Lakh), State (₹50L–₹2 Crore), National (> ₹2 Crore).</div>
+                                <div style="margin-top: 6px;">You can file where you live, where the problem happened, or online.</div>
+                            </div>
+                        </div>
+                        <div class="card-citation">Jurisdiction Rules 2021 | Rules 3–5; CPA 2019 Section 34(2), 35</div>
+                    </div>
+                    """
+                st.markdown(where_html, unsafe_allow_html=True)
+
+            # Card 2: Deadline
+            with col_deadline:
+                deadline_html = """
+                <div class="result-card">
+                    <div>
+                        <div class="card-heading">⏳ Deadline</div>
+                        <div class="card-body">
+                            <div>File within <b>two years</b> from the date on which the cause of action arose.</div>
+                            <div style="margin-top: 6px;">Late complaints may be admitted only if you satisfy the Commission that you had sufficient cause for delay.</div>
+                        </div>
+                    </div>
+                    <div class="card-citation">Consumer Protection Act 2019 | Section 69</div>
+                </div>
+                """
+                st.markdown(deadline_html, unsafe_allow_html=True)
+
+            # Card 3: You can ask for
+            with col_relief:
+                relief_html = """
+                <div class="result-card">
+                    <div>
+                        <div class="card-heading">⚖️ You can ask for</div>
+                        <div class="card-body">
+                            <div>• <b>Remove defect</b> or <b>replace goods</b> with new defect-free goods</div>
+                            <div style="margin-top: 3px;">• <b>Full refund</b> of price or charges paid, with interest</div>
+                            <div style="margin-top: 3px;">• <b>Compensation</b> for loss, injury or punitive damages</div>
+                        </div>
+                    </div>
+                    <div class="card-citation">Consumer Protection Act 2019 | Section 39(1)(a)-(d)</div>
+                </div>
+                """
+                st.markdown(relief_html, unsafe_allow_html=True)
+
+            # Official Portals to File or Register Grievance
+            st.markdown(
+                """<div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 18px; margin-top: 14px; margin-bottom: 14px; font-size: 14px; color: #334155;">
+                    <b>Official Portals to File or Register Grievance:</b><br/>
+                    • <b>e-Daakhil Portal:</b> File your complaint electronically before District, State, or National Consumer Commissions at <a href="https://edaakhil.nic.in" target="_blank" rel="noopener noreferrer" style="color: #1d4ed8; text-decoration: underline; font-weight: 600;">edaakhil.nic.in</a> (under Section 35 of CPA 2019).<br/>
+                    • <b>National Consumer Helpline (NCH):</b> Register consumer grievances for pre-litigation departmental mediation at <a href="https://consumerhelpline.gov.in" target="_blank" rel="noopener noreferrer" style="color: #1d4ed8; text-decoration: underline; font-weight: 600;">consumerhelpline.gov.in</a> or call Toll-Free <b>1915</b>.
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+            col_portal1, col_portal2 = st.columns(2)
+            with col_portal1:
+                st.link_button("🌐 File Online on e-Daakhil (edaakhil.nic.in)", "https://edaakhil.nic.in", use_container_width=True)
+            with col_portal2:
+                st.link_button("📞 National Consumer Helpline (consumerhelpline.gov.in)", "https://consumerhelpline.gov.in", use_container_width=True)
+
+            # Expander: only rendered when passages are found
+            with st.expander("📝 Generate Ready-to-File Complaint Draft (Copy & Submit)", expanded=False):
+                st.caption("A structured formal complaint draft based on Section 35 of the Consumer Protection Act, 2019. You can copy, fill in your personal details, and file directly with the Consumer Commission or on e-Daakhil.")
+                st.info("Review and fill every [blank], and edit the facts (dates, what you did, what the seller said) before filing.")
+                complaint_draft = generate_complaint_draft(query_text, guidance)
+                st.code(complaint_draft, language="text")
+                st.download_button(
+                    label="📥 Download Complaint Draft (.txt)",
+                    data=complaint_draft,
+                    file_name="consumer_complaint_draft.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+
+            # 3b. Laws that apply to your problem
+            st.markdown("### Laws that apply to your problem")
+            for rank, (doc_id, _) in enumerate(top_5, 1):
+                passage_data = passages_dict.get(doc_id, {})
+                raw_text = passage_data.get('text', '')
+                breadcrumb = passage_data.get('metadata', {}).get('breadcrumb', doc_id)
+                doc_tag = passage_data.get('metadata', {}).get('doc', '')
+                
+                lines = format_passage_lines(raw_text)
+                
+                # Top 5 passages as expanders, first expanded by default, titled with breadcrumb
+                with st.expander(f"{breadcrumb}", expanded=(rank == 1)):
+                    if len(lines) > 12:
+                        first_8_text = "\n".join(lines[:8])
+                        highlighted_first_8 = highlight_terms(first_8_text, query_text)
+                        st.markdown(f'<div class="passage-text">{highlighted_first_8}</div>', unsafe_allow_html=True)
+                        
+                        rest_text = "\n".join(lines[8:])
+                        highlighted_rest = highlight_terms(rest_text, query_text)
+                        with st.expander("Show full text", expanded=False):
+                            st.markdown(f'<div class="passage-text">{highlighted_rest}</div>', unsafe_allow_html=True)
+                    else:
+                        full_text = "\n".join(lines)
+                        highlighted_body = highlight_terms(full_text, query_text)
                         st.markdown(f'<div class="passage-text">{highlighted_body}</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="passage-caption">Passage ID: {doc_id} &nbsp;|&nbsp; Document: {doc_tag}</div>', unsafe_allow_html=True)
+
+                    st.markdown(f'<div class="passage-caption">Passage ID: {doc_id} &nbsp;|&nbsp; Document: {doc_tag}</div>', unsafe_allow_html=True)
 
 # 3c. Footer Line
 st.markdown("""

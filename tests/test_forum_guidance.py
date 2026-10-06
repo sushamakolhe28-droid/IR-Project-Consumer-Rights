@@ -94,5 +94,74 @@ class TestForumGuidance(unittest.TestCase):
         self.assertTrue(guidance["show_forum_box"])
         self.assertEqual(guidance["forum_tier"], "District Commission")
 
+    def test_indian_digit_grouping_100656(self):
+        # "Rs 1,00,656" -> 100656 District Commission
+        text = "Rs 1,00,656"
+        amounts = parse_monetary_amount(text)
+        self.assertEqual(len(amounts), 1)
+        self.assertEqual(amounts[0][0], 100656.0)
+        self.assertEqual(amounts[0][1], "Rs 1,00,656")
+
+        guidance = get_forum_guidance(text)
+        self.assertTrue(guidance["show_forum_box"])
+        self.assertEqual(guidance["amount"], 100656.0)
+        self.assertEqual(guidance["forum_tier"], "District Commission")
+
+    def test_indian_digit_grouping_1_lakh(self):
+        # "Rs 1,00,000" -> District Commission
+        text = "Rs 1,00,000"
+        amounts = parse_monetary_amount(text)
+        self.assertEqual(len(amounts), 1)
+        self.assertEqual(amounts[0][0], 100000.0)
+
+        guidance = get_forum_guidance(text)
+        self.assertTrue(guidance["show_forum_box"])
+        self.assertEqual(guidance["amount"], 100000.0)
+        self.assertEqual(guidance["forum_tier"], "District Commission")
+
+    def test_indian_digit_grouping_1_5_crore(self):
+        # "Rs 1,50,00,000" -> 1.5 crore State Commission
+        text = "Rs 1,50,00,000"
+        amounts = parse_monetary_amount(text)
+        self.assertEqual(len(amounts), 1)
+        self.assertEqual(amounts[0][0], 15000000.0)
+
+        guidance = get_forum_guidance(text)
+        self.assertTrue(guidance["show_forum_box"])
+        self.assertEqual(guidance["amount"], 15000000.0)
+        self.assertEqual(guidance["forum_tier"], "State Commission")
+
+    def test_multiple_amounts_paid_vs_delivery(self):
+        # "paid Rs 45,000 and Rs 200 for delivery" -> 45,000 District Commission
+        text = "paid Rs 45,000 and Rs 200 for delivery"
+        amounts = parse_monetary_amount(text)
+        self.assertEqual(len(amounts), 2)
+        self.assertEqual(amounts[0][0], 45000.0)
+        self.assertEqual(amounts[1][0], 200.0)
+
+        guidance = get_forum_guidance(text)
+        self.assertTrue(guidance["show_forum_box"])
+        self.assertEqual(guidance["amount"], 45000.0)
+        self.assertEqual(guidance["forum_tier"], "District Commission")
+
+    def test_indian_digit_grouping_2_5_crore_national(self):
+        # "Rs 2,50,00,000" -> National Commission
+        text = "Rs 2,50,00,000"
+        amounts = parse_monetary_amount(text)
+        self.assertEqual(len(amounts), 1)
+        self.assertEqual(amounts[0][0], 25000000.0)
+
+        guidance = get_forum_guidance(text)
+        self.assertTrue(guidance["show_forum_box"])
+        self.assertEqual(guidance["amount"], 25000000.0)
+        self.assertEqual(guidance["forum_tier"], "National Commission")
+
+    def test_sanity_rule_above_1000_crore(self):
+        # Above Rs 1,000 crore treated as parse error -> show no forum
+        text = "The company claimed damages of Rs 2,000 crore"
+        guidance = get_forum_guidance(text)
+        self.assertFalse(guidance["show_forum_box"], "Above Rs 1,000 crore must show no forum")
+        self.assertIsNone(guidance["amount"])
+
 if __name__ == '__main__':
     unittest.main()
